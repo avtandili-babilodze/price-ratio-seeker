@@ -55,7 +55,7 @@ if not "!errorlevel!"=="0" (
 
 REM --- 3. Run the app --------------------------------------------------
 echo Starting Stock Price Viewer...
-".venv\Scripts\python.exe" stock_viewer.py
+".venv\Scripts\python.exe" main.py
 set "EXITCODE=!errorlevel!"
 echo.
 echo The app has closed ^(exit code %EXITCODE%^).

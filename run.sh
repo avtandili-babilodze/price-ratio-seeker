@@ -48,4 +48,4 @@ fi
 
 # --- 4. Run ----------------------------------------------------------
 echo "Starting Stock Price Viewer..."
-exec .venv/bin/python stock_viewer.py
+exec .venv/bin/python main.py
