@@ -1,11 +1,14 @@
 """Analysis of price histories: evaluators, trends, recommendations.
 
-This package is the home for future features, e.g.:
+Current modules:
 
-    regression.py    linear-regression trend evaluators over PriceHistory
-    suggestions.py   ranking / top-stock suggestions built on evaluators
+    indicators.py    technical indicators (SMA, EMA, RSI, Bollinger)
 
 Modules here consume `priceseeker.data.PriceHistory` objects and must not
 import tkinter or matplotlib — return plain results (numbers, dataclasses,
 pandas objects) and let `priceseeker.ui` decide how to display them.
 """
+
+from .indicators import bollinger, ema, rsi, sma
+
+__all__ = ["bollinger", "ema", "rsi", "sma"]

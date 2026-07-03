@@ -14,3 +14,10 @@ BASELINE = "#c3c2b7"
 
 SERIES = ["#2a78d6", "#1baf7a", "#eda100", "#008300",
           "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"]
+
+# Indicator overlays. These only appear on single-ticker charts, where the
+# price line is SERIES[0] blue, so clashes with later SERIES slots are moot.
+IND_SMA = "#eda100"
+IND_EMA = "#4a3aa7"
+IND_BAND = "#7d9ec4"
+IND_RSI = "#2a78d6"

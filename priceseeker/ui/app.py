@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .. import config, theme
+from ..analysis import bollinger, ema, rsi, sma
 from ..data import fetch_history, search_symbols
 from .chart import ChartPanel
 from .suggest import SuggestionDropdown
@@ -26,6 +27,7 @@ class StockViewer(tk.Tk):
         self.suggest_seq = 0  # same idea for symbol-search lookups
         self._suggest_after = None  # pending debounce timer id
         self._last_entry_text = ""
+        self.last_histories = []  # cached so indicator toggles replot offline
 
         self._build_toolbar()
         self.chart = ChartPanel(self)
@@ -58,6 +60,20 @@ class StockViewer(tk.Tk):
         self.entry.bind("<Escape>", lambda e: self.suggest.hide())
 
         ttk.Button(bar, text="Fetch", command=self.fetch).pack(side="left")
+
+        self.indicator_vars = {}
+        for key, text in (("sma", f"SMA {config.SMA_WINDOW}"),
+                          ("ema", f"EMA {config.EMA_SPAN}"),
+                          ("bands", "Bands"),
+                          ("rsi", "RSI")):
+            var = tk.BooleanVar(value=False)
+            tk.Checkbutton(bar, text=text, variable=var, command=self._render,
+                           bg=theme.PAGE, fg=theme.INK_SECONDARY,
+                           activebackground=theme.PAGE,
+                           activeforeground=theme.INK_PRIMARY,
+                           selectcolor=theme.SURFACE,
+                           highlightthickness=0).pack(side="left", padx=(8, 0))
+            self.indicator_vars[key] = var
 
         self.period_buttons = {}
         pframe = tk.Frame(bar, bg=theme.PAGE)
@@ -171,15 +187,44 @@ class StockViewer(tk.Tk):
     def _on_fetched(self, seq, histories, errors):
         if seq != self.fetch_seq:
             return  # a newer fetch superseded this one
-        if histories:
-            colored = [(h, theme.SERIES[i]) for i, h in enumerate(histories)]
-            self.chart.plot(colored, title=self._title(histories))
         if errors:
             self.status.configure(text=" | ".join(errors))
         elif histories:
             self.status.configure(
                 text=f"Loaded {', '.join(h.ticker for h in histories)} "
                      f"({self.period_label}). Hover the chart for values.")
+        if histories:
+            self.last_histories = histories
+            self._render()  # after status: its single-ticker hint may override
+
+    def _render(self):
+        """Redraw the chart from cached histories with current indicators."""
+        histories = self.last_histories
+        if not histories:
+            return
+        colored = [(h, theme.SERIES[i]) for i, h in enumerate(histories)]
+
+        overlays, bands, rsi_series = [], None, None
+        wanted = {k for k, v in self.indicator_vars.items() if v.get()}
+        if wanted and len(histories) > 1:
+            self.status.configure(
+                text="Indicators are shown on single-ticker charts only.")
+        elif wanted:
+            close = histories[0].close
+            if "sma" in wanted:
+                overlays.append((f"SMA {config.SMA_WINDOW}",
+                                 sma(close, config.SMA_WINDOW), theme.IND_SMA))
+            if "ema" in wanted:
+                overlays.append((f"EMA {config.EMA_SPAN}",
+                                 ema(close, config.EMA_SPAN), theme.IND_EMA))
+            if "bands" in wanted:
+                bands = bollinger(close, config.BOLLINGER_WINDOW,
+                                  config.BOLLINGER_STD)
+            if "rsi" in wanted:
+                rsi_series = rsi(close, config.RSI_PERIOD)
+
+        self.chart.plot(colored, title=self._title(histories),
+                        overlays=overlays, bands=bands, rsi=rsi_series)
 
     def _title(self, histories):
         if len(histories) > 1:
