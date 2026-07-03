@@ -18,3 +18,7 @@ DEFAULT_TICKER = "AAPL"
 
 # One chart can show at most one series per categorical color slot.
 MAX_TICKERS = len(theme.SERIES)
+
+# Ticker search-as-you-type
+SUGGEST_DELAY_MS = 300  # debounce between last keystroke and the lookup
+MAX_SUGGESTIONS = 6

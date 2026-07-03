@@ -9,8 +9,9 @@ import tkinter as tk
 from tkinter import ttk
 
 from .. import config, theme
-from ..data import fetch_history
+from ..data import fetch_history, search_symbols
 from .chart import ChartPanel
+from .suggest import SuggestionDropdown
 
 
 class StockViewer(tk.Tk):
@@ -22,6 +23,9 @@ class StockViewer(tk.Tk):
 
         self.period_label = config.DEFAULT_PERIOD
         self.fetch_seq = 0  # ignore stale responses from superseded fetches
+        self.suggest_seq = 0  # same idea for symbol-search lookups
+        self._suggest_after = None  # pending debounce timer id
+        self._last_entry_text = ""
 
         self._build_toolbar()
         self.chart = ChartPanel(self)
@@ -45,7 +49,13 @@ class StockViewer(tk.Tk):
                               highlightthickness=0,
                               insertbackground=theme.INK_PRIMARY)
         self.entry.pack(side="left", padx=(8, 8), ipady=3)
-        self.entry.bind("<Return>", lambda e: self.fetch())
+
+        self.suggest = SuggestionDropdown(self.entry, self._use_suggestion)
+        self.entry.bind("<Return>", self._on_return)
+        self.entry.bind("<KeyRelease>", self._on_entry_key)
+        self.entry.bind("<Down>", lambda e: self.suggest.move(+1))
+        self.entry.bind("<Up>", lambda e: self.suggest.move(-1))
+        self.entry.bind("<Escape>", lambda e: self.suggest.hide())
 
         ttk.Button(bar, text="Fetch", command=self.fetch).pack(side="left")
 
@@ -66,6 +76,59 @@ class StockViewer(tk.Tk):
                                bg=theme.PAGE, fg=theme.INK_MUTED)
         self.status.pack(fill="x", padx=12, pady=(2, 8))
 
+    # ---------- Symbol suggestions ----------
+
+    def _on_entry_key(self, event):
+        text = self.entry.get()
+        if text == self._last_entry_text:
+            return  # navigation key, not an edit
+        self._last_entry_text = text
+        if self._suggest_after:
+            self.after_cancel(self._suggest_after)
+        self._suggest_after = self.after(config.SUGGEST_DELAY_MS,
+                                         self._request_suggestions)
+
+    def _request_suggestions(self):
+        self._suggest_after = None
+        # Only the segment after the last comma is being typed.
+        query = self.entry.get().rsplit(",", 1)[-1].strip()
+        if len(query) < 2:
+            self.suggest.hide()
+            return
+        self.suggest_seq += 1
+        threading.Thread(target=self._suggest_worker,
+                         args=(self.suggest_seq, query),
+                         daemon=True).start()
+
+    def _suggest_worker(self, seq, query):
+        results = search_symbols(query, limit=config.MAX_SUGGESTIONS)
+        self.after(0, lambda: self._on_suggestions(seq, results))
+
+    def _on_suggestions(self, seq, results):
+        if seq != self.suggest_seq or self.focus_get() is not self.entry:
+            return
+        self.suggest.show(results)
+
+    def _use_suggestion(self, symbol):
+        parts = self.entry.get().rsplit(",", 1)
+        prefix = parts[0] + ", " if len(parts) > 1 else ""
+        self.entry.delete(0, "end")
+        self.entry.insert(0, prefix + symbol)
+        self._last_entry_text = self.entry.get()
+        self.fetch()
+
+    def _cancel_suggestions(self):
+        if self._suggest_after:
+            self.after_cancel(self._suggest_after)
+            self._suggest_after = None
+        self.suggest_seq += 1  # drop any lookup already in flight
+        self.suggest.hide()
+
+    def _on_return(self, event=None):
+        if self.suggest.pick_active():
+            return  # picking already triggers a fetch
+        self.fetch()
+
     # ---------- Actions ----------
 
     def set_period(self, label):
@@ -81,6 +144,7 @@ class StockViewer(tk.Tk):
                         font=("TkDefaultFont", 9, "bold" if active else "normal"))
 
     def fetch(self):
+        self._cancel_suggestions()
         tickers = [t.strip().upper()
                    for t in self.entry.get().split(",") if t.strip()]
         if not tickers:
