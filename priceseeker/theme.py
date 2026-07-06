@@ -21,3 +21,4 @@ IND_SMA = "#eda100"
 IND_EMA = "#4a3aa7"
 IND_BAND = "#7d9ec4"
 IND_RSI = "#2a78d6"
+IND_VOL = "#aebfd4"  # volume bars

@@ -7,10 +7,20 @@ matplotlib.use("TkAgg")
 
 import matplotlib.dates as mdates
 import numpy as np
+from matplotlib import ticker as mticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 from .. import theme
+
+
+def _fmt_volume(value, _pos=None):
+    """Tick/tooltip label for share counts: 950, 12K, 3.4M, 1.2B."""
+    for div, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(value) >= div:
+            text = f"{value / div:.1f}".rstrip("0").rstrip(".")
+            return text + suffix
+    return f"{value:.0f}"
 
 
 class ChartPanel:
@@ -22,8 +32,11 @@ class ChartPanel:
       overlays  [(label, Series, color)] drawn over the price axes
       bands     (mid, upper, lower) Series triple drawn as a shaded band
       rsi       Series on a 0-100 scale, shown in its own sub-panel
+      volume    Series of traded volume, shown as bars in a sub-panel
       percent   the series are % change, not prices: values are shown
                 signed with a % suffix, plus a zero baseline
+      log       log-scale price axis (caller must not combine with percent,
+                whose values can be negative)
     """
 
     def __init__(self, master):
@@ -33,38 +46,47 @@ class ChartPanel:
         self.canvas.mpl_connect("figure_leave_event", lambda e: self._hide_hover())
         self.plotted = []  # [(PriceHistory, color)] currently on the axes
         self.ax = None
+        self.ax_vol = None
         self.ax_rsi = None
+        self._vol_series = None
         self._rsi_series = None
 
     @property
     def widget(self):
         return self.canvas.get_tk_widget()
 
-    def _layout(self, with_rsi):
-        """Rebuild the axes; the RSI panel exists only when requested."""
+    def _layout(self, with_volume, with_rsi):
+        """Rebuild the axes; volume/RSI panels exist only when requested."""
         self.fig.clear()
         self.plotted = []
+        self._vol_series = None
         self._rsi_series = None
-        if with_rsi:
-            gs = self.fig.add_gridspec(2, 1, height_ratios=(3, 1), hspace=0.10)
-            self.ax = self.fig.add_subplot(gs[0])
-            self.ax_rsi = self.fig.add_subplot(gs[1], sharex=self.ax)
-            self.ax.tick_params(labelbottom=False)
+        rows = 1 + int(with_volume) + int(with_rsi)
+        if rows == 1:
+            axes = [self.fig.add_subplot(111)]
         else:
-            self.ax = self.fig.add_subplot(111)
-            self.ax_rsi = None
-        for ax in filter(None, (self.ax, self.ax_rsi)):
+            gs = self.fig.add_gridspec(rows, 1, hspace=0.12,
+                                       height_ratios=(3,) + (1,) * (rows - 1))
+            axes = [self.fig.add_subplot(gs[0])]
+            for row in range(1, rows):
+                axes.append(self.fig.add_subplot(gs[row], sharex=axes[0]))
+        self.ax = axes[0]
+        self.ax_vol = axes[1] if with_volume else None
+        self.ax_rsi = axes[-1] if with_rsi else None
+        for ax in axes[:-1]:
+            ax.tick_params(labelbottom=False)
+        for ax in axes:
             self._style_axes(ax)
         self.fig.subplots_adjust(left=0.07, right=0.90, top=0.90, bottom=0.10)
 
     def show_message(self, text):
-        self._layout(with_rsi=False)
+        self._layout(with_volume=False, with_rsi=False)
         self.ax.set_title(text, color=theme.INK_SECONDARY, fontsize=11, loc="left")
         self.canvas.draw_idle()
 
     def plot(self, histories_with_colors, title, overlays=(), bands=None,
-             rsi=None, percent=False):
-        self._layout(with_rsi=rsi is not None)
+             rsi=None, volume=None, percent=False, log=False):
+        self._layout(with_volume=volume is not None, with_rsi=rsi is not None)
         ax = self.ax
         self._fmt = ("{:+,.2f}%" if percent else "{:,.2f}").format
 
@@ -91,6 +113,19 @@ class ChartPanel:
             ax.plot(series.index, series.values, color=color,
                     linewidth=1.3, label=label)
 
+        if log:
+            ax.set_yscale("log")
+            lo, hi = ax.dataLim.intervaly
+            if lo > 0 and hi / lo < 10:
+                # Under a decade of range the default log ticks are too
+                # sparse (often a single power of ten); pick round values.
+                ax.yaxis.set_major_locator(
+                    mticker.MaxNLocator(nbins=6, steps=[1, 2, 2.5, 5, 10]))
+            fmt = mticker.ScalarFormatter()
+            fmt.set_scientific(False)
+            ax.yaxis.set_major_formatter(fmt)
+            ax.yaxis.set_minor_formatter(mticker.NullFormatter())
+
         if len(self.plotted) > 1 or overlays or bands is not None:
             ax.legend(loc="upper left", frameon=False, fontsize=9,
                       labelcolor=theme.INK_SECONDARY)
@@ -99,10 +134,13 @@ class ChartPanel:
         ax.set_ylabel("% change" if percent else "Price",
                       color=theme.INK_MUTED, fontsize=9)
 
+        if volume is not None:
+            self._plot_volume(volume)
         if rsi is not None:
             self._plot_rsi(rsi)
 
-        bottom = self.ax_rsi if self.ax_rsi is not None else ax
+        bottom = next(a for a in (self.ax_rsi, self.ax_vol, ax)
+                      if a is not None)
         locator = mdates.AutoDateLocator()
         bottom.xaxis.set_major_locator(locator)
         bottom.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
@@ -124,6 +162,18 @@ class ChartPanel:
         self._dots = ax.scatter([], [], s=28, zorder=9,
                                 edgecolors=theme.SURFACE, linewidths=1.5)
         self.canvas.draw_idle()
+
+    def _plot_volume(self, volume):
+        self._vol_series = volume
+        v = self.ax_vol
+        x = mdates.date2num(volume.index)
+        # Bar width in date units, sized to the sampling interval.
+        width = 0.8 * float(np.median(np.diff(x))) if len(x) > 1 else 0.5
+        v.bar(x, volume.values, width=width, color=theme.IND_VOL, linewidth=0)
+        v.set_ylabel("Vol", color=theme.INK_MUTED, fontsize=9)
+        v.yaxis.set_major_locator(mticker.MaxNLocator(3))
+        v.yaxis.set_major_formatter(mticker.FuncFormatter(_fmt_volume))
+        v.margins(x=0.02)
 
     def _plot_rsi(self, rsi):
         self._rsi_series = rsi
@@ -159,6 +209,10 @@ class ChartPanel:
             ys.append(y)
             colors.append(color)
             lines.append(f"{history.ticker}  {self._fmt(y)}")
+        if self._vol_series is not None:
+            val = self._vol_series.iloc[self._nearest(self._vol_series, when)]
+            if not np.isnan(val):
+                lines.append(f"Vol  {_fmt_volume(val)}")
         if self._rsi_series is not None:
             val = self._rsi_series.iloc[self._nearest(self._rsi_series, when)]
             if not np.isnan(val):
