@@ -61,19 +61,13 @@ class StockViewer(tk.Tk):
 
         ttk.Button(bar, text="Fetch", command=self.fetch).pack(side="left")
 
-        self.indicator_vars = {}
-        for key, text in (("sma", f"SMA {config.SMA_WINDOW}"),
-                          ("ema", f"EMA {config.EMA_SPAN}"),
-                          ("bands", "Bands"),
-                          ("rsi", "RSI")):
-            var = tk.BooleanVar(value=False)
-            tk.Checkbutton(bar, text=text, variable=var, command=self._render,
-                           bg=theme.PAGE, fg=theme.INK_SECONDARY,
-                           activebackground=theme.PAGE,
-                           activeforeground=theme.INK_PRIMARY,
-                           selectcolor=theme.SURFACE,
-                           highlightthickness=0).pack(side="left", padx=(8, 0))
-            self.indicator_vars[key] = var
+        self.percent_var = self._add_toggle(bar, "%")
+        self.indicator_vars = {
+            key: self._add_toggle(bar, text)
+            for key, text in (("sma", f"SMA {config.SMA_WINDOW}"),
+                              ("ema", f"EMA {config.EMA_SPAN}"),
+                              ("bands", "Bands"),
+                              ("rsi", "RSI"))}
 
         self.period_buttons = {}
         pframe = tk.Frame(bar, bg=theme.PAGE)
@@ -86,6 +80,17 @@ class StockViewer(tk.Tk):
             b.pack(side="left", padx=1)
             self.period_buttons[label] = b
         self._highlight_period()
+
+    def _add_toggle(self, bar, text):
+        """A replot-on-click checkbox in the toolbar; returns its variable."""
+        var = tk.BooleanVar(value=False)
+        tk.Checkbutton(bar, text=text, variable=var, command=self._render,
+                       bg=theme.PAGE, fg=theme.INK_SECONDARY,
+                       activebackground=theme.PAGE,
+                       activeforeground=theme.INK_PRIMARY,
+                       selectcolor=theme.SURFACE,
+                       highlightthickness=0).pack(side="left", padx=(8, 0))
+        return var
 
     def _build_statusbar(self):
         self.status = tk.Label(self, text="", anchor="w",
@@ -202,7 +207,9 @@ class StockViewer(tk.Tk):
         histories = self.last_histories
         if not histories:
             return
-        colored = [(h, theme.SERIES[i]) for i, h in enumerate(histories)]
+        percent = self.percent_var.get()
+        shown = [h.rebased() for h in histories] if percent else histories
+        colored = [(h, theme.SERIES[i]) for i, h in enumerate(shown)]
 
         overlays, bands, rsi_series = [], None, None
         wanted = {k for k, v in self.indicator_vars.items() if v.get()}
@@ -210,7 +217,9 @@ class StockViewer(tk.Tk):
             self.status.configure(
                 text="Indicators are shown on single-ticker charts only.")
         elif wanted:
-            close = histories[0].close
+            # Rebasing is linear, so indicators of the rebased series equal
+            # rebased indicators (and RSI is scale-invariant either way).
+            close = shown[0].close
             if "sma" in wanted:
                 overlays.append((f"SMA {config.SMA_WINDOW}",
                                  sma(close, config.SMA_WINDOW), theme.IND_SMA))
@@ -224,7 +233,8 @@ class StockViewer(tk.Tk):
                 rsi_series = rsi(close, config.RSI_PERIOD)
 
         self.chart.plot(colored, title=self._title(histories),
-                        overlays=overlays, bands=bands, rsi=rsi_series)
+                        overlays=overlays, bands=bands, rsi=rsi_series,
+                        percent=percent)
 
     def _title(self, histories):
         if len(histories) > 1:

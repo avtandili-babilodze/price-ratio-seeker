@@ -1,2 +1,6 @@
-yfinance
-matplotlib
+# Pinned: yfinance in particular changes its API often.
+# pandas/numpy are imported directly (fetcher, indicators, chart).
+yfinance==1.5.1
+matplotlib==3.11.0
+pandas==3.0.3
+numpy==2.5.0

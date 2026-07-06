@@ -22,6 +22,8 @@ class ChartPanel:
       overlays  [(label, Series, color)] drawn over the price axes
       bands     (mid, upper, lower) Series triple drawn as a shaded band
       rsi       Series on a 0-100 scale, shown in its own sub-panel
+      percent   the series are % change, not prices: values are shown
+                signed with a % suffix, plus a zero baseline
     """
 
     def __init__(self, master):
@@ -60,16 +62,20 @@ class ChartPanel:
         self.ax.set_title(text, color=theme.INK_SECONDARY, fontsize=11, loc="left")
         self.canvas.draw_idle()
 
-    def plot(self, histories_with_colors, title, overlays=(), bands=None, rsi=None):
+    def plot(self, histories_with_colors, title, overlays=(), bands=None,
+             rsi=None, percent=False):
         self._layout(with_rsi=rsi is not None)
         ax = self.ax
+        self._fmt = ("{:+,.2f}%" if percent else "{:,.2f}").format
 
         self.plotted = list(histories_with_colors)
+        if percent:
+            ax.axhline(0, color=theme.BASELINE, linewidth=0.8, linestyle="--")
         for history, color in self.plotted:
             ax.plot(history.close.index, history.close.values,
                     color=color, linewidth=2, label=history.ticker)
             # Direct label at the line's end instead of numbers on every point.
-            ax.annotate(f" {history.ticker}  {history.last:,.2f}",
+            ax.annotate(f" {history.ticker}  {self._fmt(history.last)}",
                         xy=(history.close.index[-1], history.last),
                         color=color, fontsize=9, fontweight="bold",
                         va="center", annotation_clip=False)
@@ -90,7 +96,8 @@ class ChartPanel:
                       labelcolor=theme.INK_SECONDARY)
         ax.set_title(title, color=theme.INK_PRIMARY, fontsize=12,
                      fontweight="bold", loc="left", pad=12)
-        ax.set_ylabel("Price", color=theme.INK_MUTED, fontsize=9)
+        ax.set_ylabel("% change" if percent else "Price",
+                      color=theme.INK_MUTED, fontsize=9)
 
         if rsi is not None:
             self._plot_rsi(rsi)
@@ -151,7 +158,7 @@ class ChartPanel:
             y = float(series.iloc[pos])
             ys.append(y)
             colors.append(color)
-            lines.append(f"{history.ticker}  {y:,.2f}")
+            lines.append(f"{history.ticker}  {self._fmt(y)}")
         if self._rsi_series is not None:
             val = self._rsi_series.iloc[self._nearest(self._rsi_series, when)]
             if not np.isnan(val):

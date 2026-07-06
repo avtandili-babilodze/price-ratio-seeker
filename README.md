@@ -24,14 +24,17 @@ python3 -m venv .venv
 ```
 main.py                  entry point
 priceseeker/
-├── config.py            app settings: periods, default ticker, limits
+├── config.py            app settings: periods, default ticker, limits, indicator windows
 ├── theme.py             all colors in one place
 ├── data/
-│   └── fetcher.py       Yahoo Finance access (PriceHistory, fetch_history)
-├── analysis/            future: regression evaluators, top-stock suggestions
+│   ├── fetcher.py       Yahoo Finance access (PriceHistory, fetch_history)
+│   └── search.py        ticker name/symbol lookup (search_symbols)
+├── analysis/
+│   └── indicators.py    SMA, EMA, RSI, Bollinger bands
 └── ui/
     ├── app.py           window, toolbar, status bar, background fetching
-    └── chart.py         chart panel: plotting + hover crosshair/tooltip
+    ├── chart.py         chart panel: plotting, indicator overlays, hover crosshair/tooltip
+    └── suggest.py       floating dropdown for ticker search suggestions
 ```
 
 `data/` and `analysis/` are UI-free by design: new evaluators consume
@@ -40,7 +43,19 @@ how to display them.
 
 ## Usage
 
-- Type a ticker (e.g. `AAPL`) and press **Fetch** or Enter.
+- Type a ticker (e.g. `AAPL`) or a company name (e.g. `google`) and press
+  **Fetch** or Enter. As you type, a dropdown suggests matching symbols —
+  pick one with the mouse, or arrow down and Enter.
 - Compare stocks with a comma-separated list: `AAPL, MSFT, GOOG` (up to 8).
+- Toggle **%** to rebase every line to percent change from the start of
+  the window — the way to compare stocks whose prices differ wildly.
 - Pick a time range with the buttons on the right: 1D, 5D, 1M, 6M, 1Y, 5Y, Max.
 - Hover the chart for a crosshair with exact date and prices.
+- Toggle technical indicators for a single-ticker chart (hidden when
+  comparing multiple tickers):
+  - **SMA 50 / EMA 20** — moving averages showing trend direction.
+  - **Bands** — Bollinger bands showing recent volatility.
+  - **RSI** — momentum oscillator (0–100) in its own sub-panel, with
+    30/70 overbought/oversold guide lines.
+
+  These describe past price behavior; they don't predict future prices.
